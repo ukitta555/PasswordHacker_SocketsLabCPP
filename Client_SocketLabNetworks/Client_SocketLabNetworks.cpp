@@ -1,75 +1,224 @@
 ﻿// Client_SocketLabNetworks.cpp : Этот файл содержит функцию "main". Здесь начинается и заканчивается выполнение программы.
 //
+
+#ifdef _MSC_VER
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #pragma warning(disable : 6386 6385)
 #include <iostream>
 #include <queue>
 #include "string.h"
 #include "winsock2.h"
 #include "ws2tcpip.h"
+#include <fstream>
 #include <stdlib.h>
 #include <sstream>
+#include <chrono>
+#include <ctime>  
 using namespace std;
 
+
+enum prevCommand
+{
+    Onetime,
+    Auto
+};
+
+
+ofstream fout("log_client.txt");
+prevCommand previousCommand;
 SOCKET ConnectSocket;
 bool isPasswordHacked = false;
-vector<string> alphabet = { "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
-                            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", 
-                            "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"};
+int attempts = 0;
 
-void recursiveGenerator(string prefix, int lengthLeft) 
+void getTime() 
+{  
+    auto end = std::chrono::system_clock::now();
+
+    std::time_t end_time = std::chrono::system_clock::to_time_t(end);
+
+    fout << std::ctime(&end_time) << ": ";
+}
+string convertToStr(char* cstr)
 {
-    if (isPasswordHacked)
+    string tmp(cstr);
+    return tmp;
+}
+
+// get response after sending password command
+void getResponseAfterPwdCommand()
+{
+    int bytesSent = 0;
+    int bytesRecieved = SOCKET_ERROR;
+    char* sendBuffer = new char[255];
+    char* recieveBuffer = new char[255];
+    
+    if (previousCommand == Onetime)
     {
-        return;
-    }
-    else  if (lengthLeft == 0) 
-    {
-        // 255 chars = max amount of chars in message = 254 + 1 terminate null-char
-        char* attemptedPasswordcStyle = new char[255];
-
-        char* recievedResponse = new char[255];
-
-        // get last element in vector
-        string attemptedPasswordString = prefix;
-
-        strcpy_s(attemptedPasswordcStyle, 255, attemptedPasswordString.c_str());
-
-        // send password to server
-        int bytesSent = send(ConnectSocket, attemptedPasswordcStyle, 255, 0);
-        int bytesRecieved = SOCKET_ERROR;
-        while (bytesRecieved == SOCKET_ERROR && !isPasswordHacked)
+        // get command
+        bytesRecieved = SOCKET_ERROR;
+        while (bytesRecieved == SOCKET_ERROR)
         {
-            bytesRecieved = recv(ConnectSocket, recievedResponse, 255, 0);
-            //std::cout << "lol";
+            bytesRecieved = recv(ConnectSocket, recieveBuffer, 255, 0);
         }
-
-        if (strcmp (recievedResponse, "YES!") == 0)
+        
+        string command = convertToStr(recieveBuffer);
+        getTime(); fout << "got " << command << " from server" << endl;
+        if (command == "pwdcracker(gotit)")
         {
             isPasswordHacked = true;
+            cout << "Password hacked!" << endl;
         }
-        std::cout << "Password:" << attemptedPasswordString << " , is hacked:" << recievedResponse << endl;
-        // delete array to prevent memory leaks
-        delete[] attemptedPasswordcStyle;
-        delete[] recievedResponse;
-        //Sleep(1000)
+        else if (command == "pwdcracker(tryanotherpwd)")
+        {
+            cout << "Wrong pwd! Attempts:"  << ++attempts << endl;
+        }
+        else if (command == "pwdcracker(badparsepwd)")
+        {
+            cout << "password wasn't parsed properly on server. Please, relaunch!" << endl;
+        }
+        else 
+        {
+            cout << "Bad command recieved from server." << endl;
+        }
     }
+    else
+    {
+        // get command
+        bytesRecieved = SOCKET_ERROR;
+        while (bytesRecieved == SOCKET_ERROR)
+        {
+            bytesRecieved = recv(ConnectSocket, recieveBuffer, 255, 0);
+        }
+
+        string command = convertToStr(recieveBuffer);
+
+        if (command == "pwdcracker(gotit)")
+        {
+            isPasswordHacked = true;
+
+            // get amount of attempts
+            bytesRecieved = SOCKET_ERROR;
+            while (bytesRecieved == SOCKET_ERROR)
+            {
+                bytesRecieved = recv(ConnectSocket, recieveBuffer, 255, 0);
+            }
+            cout << "Password hacked! Amount of attempts:" << recieveBuffer << endl;
+        }
+        else if (command == "pwdcracker(tryanotherpwd)") 
+        {
+            cout << "Password wasn't hacked." << endl;
+        }
+        else
+        {
+            cout << "Bad command recieved from server." << endl;
+        }
+    }
+    delete[] sendBuffer;
+    delete[] recieveBuffer;
+}
+
+// send one of the password commands to server
+bool sendPasswordToServer(string command)
+{
+
+    int bytesSent = 0;
+    int bytesRecieved = SOCKET_ERROR;
+    char* sendBuffer = new char[255];
+    char* recieveBuffer = new char[255];
+
+    size_t isOnetime = command.find("pwdcracker(onetime)");
+    size_t isAuto = command.find("pwdcracker(auto)");
+    if (isOnetime != string::npos)
+    {
+        previousCommand = Onetime;
+        
+        // send command
+        bytesSent = send(ConnectSocket, command.c_str(), 255, 0);
+        getTime(); fout << "sent " << command.c_str() << " to server" << endl;
+        string args = "";
+        cin >> args;
+        bytesSent = send(ConnectSocket, args.c_str(), 255, 0);
+        getTime(); fout << "sent " << args.c_str() << " to server" << endl;
+        //cout << "Password sent: " << command.substr(20, command.length()) << endl;
+    }
+    else if (isAuto != string::npos)
+    {
+        previousCommand = Auto;
+        // send command
+        bytesSent = send(ConnectSocket, command.c_str(), 255, 0);
+        getTime(); fout << "sent " << command.c_str() << " to server" << endl;
+    }
+
     else 
     {
-        for (size_t i = 0; i < alphabet.size(); i++)
-        {
-           recursiveGenerator(prefix + alphabet[i], lengthLeft - 1);
-        }
+        cout << "Bad command. Try again." << endl;
+        return false;
+    }
+    delete[] sendBuffer;
+    delete[] recieveBuffer;
+    return true;
+}
+
+// get password length from server
+int getPasswordLength() 
+{
+    int bytesSent = 0;
+    int bytesRecieved = SOCKET_ERROR;
+    char* sendBuffer = new char[255];
+    char* recieveBuffer = new char[255];
+    int pwdLength = 0;
+    
+    // wait for length
+    bytesRecieved = SOCKET_ERROR;
+    while (bytesRecieved == SOCKET_ERROR)
+    {
+        bytesRecieved = recv(ConnectSocket, recieveBuffer, 255, 0);
+        getTime(); fout << "got " << recieveBuffer << " from server" << endl;
+    }
+
+    stringstream ss(recieveBuffer);
+    
+    delete[] sendBuffer;
+    delete[] recieveBuffer;
+    // convert string to int and check whether it was succesful
+    if (ss >> pwdLength)
+    {
+        return pwdLength;
+    }
+    else
+    {
+        return -1;
     }
 }
 
-void hackPwd(int length) 
+// send first message to server
+char* tryToStartMessaging()
 {
-    recursiveGenerator("", length);
+    int bytesSent = 0;
+    int bytesRecieved = SOCKET_ERROR;
+    char* sendBuffer = new char[255];
+    char* recieveBuffer = new char[255];
+
+    cout << "start messaging with server (pwdcracker(use)):" << endl;
+    // command that tries to get access to password cracker service
+    cin >> sendBuffer;
+    bytesSent = send(ConnectSocket, sendBuffer, 255, 0);
+    getTime(); fout << "sent " << sendBuffer << " to server" << endl;
+    // wait for response
+    bytesRecieved = SOCKET_ERROR;
+    while (bytesRecieved == SOCKET_ERROR)
+    {
+        bytesRecieved = recv(ConnectSocket, recieveBuffer, 255, 0);
+        getTime(); fout << "got " << recieveBuffer << " from server" << endl;
+    }
+    delete[] sendBuffer;
+    return recieveBuffer;
 }
 
-int main()
-{
-   
+// init socket
+int initSocket() {
     //----------------------
     // Initialize Winsock
     WSADATA wsaData;
@@ -83,7 +232,7 @@ int main()
     if (ConnectSocket == INVALID_SOCKET) {
         printf("Error at socket(): %ld\n", WSAGetLastError());
         WSACleanup();
-        return 0;
+        return -1;
     }
 
     //----------------------
@@ -94,31 +243,80 @@ int main()
     inet_pton(AF_INET, "127.0.0.1", &clientService.sin_addr.s_addr);
     clientService.sin_port = htons(1028);
 
+
     //----------------------
     // Connect to server.
     if (connect(ConnectSocket, (SOCKADDR*)&clientService, sizeof(clientService)) == SOCKET_ERROR) {
         printf("Failed to connect.\n");
         WSACleanup();
-        return 0;
+        return -1;
     }
 
     printf("Connected to server.\n");
+    return 0;
+}
 
-    
-    char* buffer = new char[255];
-    int bytes = recv(ConnectSocket, buffer, 255, 0);
-    stringstream ss(buffer);
-    int pwdLength = 0;
-    if (ss >> pwdLength)
-    {
-        delete[] buffer;
-        hackPwd(pwdLength);
-    }
-    else
+
+
+
+int main()
+{
+    if (initSocket() == -1)
     {
         return -1;
-    }    
+    }
+
+    int bytesSent = 0;
+    int bytesRecieved = SOCKET_ERROR;
+    char* sendBuffer = new char[255];
+    char* recieveBuffer = new char[255];
     
+    string command = "";
+    while (command != "pwdcracker(ok)") 
+    {
+         command = convertToStr(tryToStartMessaging());
+         if (command != "pwdcracker(ok)" && command != "Nekriach_V._V._K_27_pwdcracker")
+         {
+             cout << "Wrong command to start using server! Try again." << endl;
+         }
+         if (command == "Nekriach_V._V._K_27_pwdcracker") 
+         {
+             cout << command << endl; 
+         }
+    }
+    
+    cout << "Recieved pwdcracker(ok) from server" << endl;
+    int pwdLength = getPasswordLength();
+        
+    if (pwdLength == -1)
+    {
+        cout << "Couldn't parse password length. Halting." << endl;
+        return -1;
+    }
+    while (!isPasswordHacked)
+    {
+        if (command == "pwdcracker(ok)")
+        {
+            cout << "Password length is:" << pwdLength << endl;
+            while (!isPasswordHacked)
+            {
+                cout << "Enter something: pwdcracker(auto) or pwdcracker(onetime)" << endl;
+                string command;
+                cin >> command;
+                if (sendPasswordToServer(command))
+                {
+                    getResponseAfterPwdCommand();
+                }
+            }
+            cout << "Halting as password was cracked..." << endl;
+        }
+        else
+        {
+            cout << "Recieved " << command << "from server. Try again" << endl;
+        }
+    }
+    delete[] sendBuffer;
+    delete[] recieveBuffer;
     WSACleanup();
     return 0;
 }
